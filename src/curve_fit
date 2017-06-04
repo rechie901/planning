@@ -1,0 +1,69 @@
+#include <stdio.h>
+#include <ros/ros.h>
+#include <stdlib.h>
+#include <math.h>
+#include <iostream>
+#include <Eigen/Dense>
+#include <ecl/geometry.hpp>
+#include <ecl/containers.hpp>
+#include <nav_msgs/Path.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <visualization_msgs/Marker.h>
+#include <tf/transform_datatypes.h>
+#include <string>
+#include <sstream>
+
+
+// #define max_accel 100   //percent throttle
+// #define PI 3.14159
+// #define max_speed 20   //kmph
+// #define l 2.1          // wheelbase length in meters
+
+using ecl::SmoothLinearSpline;
+using ecl::CubicSpline;
+using ecl::TensionSpline;
+using ecl::Array;
+
+int main(int argc, char **argv){
+	ros::init(argc, argv, "spline_node");
+  	ros::NodeHandle node;
+	CubicSpline cubic1, cubic2;
+	//SmoothLinearSpline spline1, spline2;
+
+
+	ros::Publisher pub = node.advertise<nav_msgs::Path>("path", 1);
+	ros::Publisher pub2 = node.advertise<nav_msgs::Path>("expected_path", 1);
+	ros::Publisher vis_pub = node.advertise<visualization_msgs::Marker>( "visualization_marker", 1 );
+	ros::Publisher vis_pub2 = node.advertise<visualization_msgs::Marker>( "visualization_marker_text", 1 );
+	nav_msgs::Path path,expected;
+	path.header.frame_id = "odom";
+	path.header.stamp = ros::Time();
+	expected.header.frame_id = "odom";
+	expected.header.stamp = ros::Time();
+
+
+	path.poses.resize(states.size());
+	expected.poses.resize(curve_vec.size());
+	for(int i ; i < states.size(); i++){
+		path.poses[i].pose.position.x = states[i].x;
+		path.poses[i].pose.position.y = states[i].y;
+	}
+	for(int i ; i < curve_vec.size(); i++){
+		expected.poses[i].pose.position.x = curve_vec[i].kx;
+		expected.poses[i].pose.position.y = curve_vec[i].ky;
+	}
+
+	ros::Rate loop_rate(100);
+	while(ros::ok()){
+
+		// for (int i = 0; i < states.size(); ++i)
+		// {
+		pub.publish(path);
+		pub2.publish(expected);
+		loop_rate.sleep();
+		ros::spinOnce();
+		
+	}
+	
+	return 0;
+}

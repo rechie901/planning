@@ -138,6 +138,8 @@ include_directories(
 ## Declare a C++ executable
 add_executable(p2pnav_node src/main.cpp)
 add_executable(spline_node src/spline.cpp)
+add_executable(curve_fit src/curve_fit.cpp)
+add_executable(spline2 src/spline2.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(p2pnav_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -147,6 +149,12 @@ target_link_libraries(p2pnav_node
    ${catkin_LIBRARIES}
 )
 target_link_libraries(spline_node
+   ${catkin_LIBRARIES}
+)
+target_link_libraries(curve_fit
+   ${catkin_LIBRARIES}
+)
+target_link_libraries(spline2
    ${catkin_LIBRARIES}
 )
 

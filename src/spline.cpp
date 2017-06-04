@@ -2,6 +2,7 @@
 #include <ros/ros.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cmath>
 #include <iostream>
 #include <Eigen/Dense>
 #include <ecl/geometry.hpp>
@@ -15,6 +16,7 @@
 #include <tf/transform_datatypes.h>
 #include <string>
 #include <sstream>
+#include "spline.h"
 
 
 #define max_accel 100   //percent throttle
@@ -44,11 +46,43 @@ struct control_parameters{
 struct can_output{
 	float throttle, brake, steer_angle, steer_dir;
 };
+struct waypoints{
+	double x, y;
+};
 
 state current_states;
 state terminal_states;
 state mid_states;
 state init_pos;
+
+float cubic_spline(std::vector<waypoints> &points,std::vector<curve> &curve_pts,state current_pos){
+	float length = 0;
+	tk::spline sx,sy;
+	std::vector<double> t,x,y;
+	t.resize(3);
+	t[0] = 0 ; t[1] = 15; t[2] = 29;
+	for (int i = 0; i < points.size(); ++i)
+	{
+		x.push_back(points[i].x);
+		y.push_back(points[i].y);
+	}
+   	sx.set_points(t,x);
+   	sy.set_points(t,y);
+   	curve_pts.resize(points.size()*10);
+   	std::cout<<curve_pts.size()<<std::endl;
+   	for (int i = 0; i < curve_pts.size(); ++i)
+   	{
+		curve_pts[i].kx = sx(i);
+		curve_pts[i].ky = sy(i);
+		if(i>0){
+			length = length + sqrt((curve_pts[i].kx-curve_pts[i-1].kx)*(curve_pts[i].kx- curve_pts[i-1].kx) + (curve_pts[i].ky-curve_pts[i-1].ky)*(curve_pts[i].ky-curve_pts[i-1].ky));
+			//theta = theta + abs(atan((path[i].ky - path[i-1].ky)/path[i].kx - path[i-1].kx));
+		}
+		std::cout<<i <<" length "<< length<<" x "<< sx(i) << " y "<<curve_pts[i].ky  <<  std::endl;
+   	}
+   	
+   	return length;
+}
 
 void compute_states(std::vector<state>& states, state current_states, std::vector<control>& controller, float step_size){
 	float init_x = current_states.x;
@@ -56,6 +90,7 @@ void compute_states(std::vector<state>& states, state current_states, std::vecto
 	float init_heading = current_states.heading;
 	float init_velocity = current_states.velocity;
 	float last_heading = init_heading;
+	float del_theta=0;
 	states.resize(controller.size()-1); 
 	for (int j = 0; j < controller.size()-1; ++j)
 	{
@@ -78,6 +113,8 @@ void compute_states(std::vector<state>& states, state current_states, std::vecto
 		if(des_heading < 0 && (controller[it+1].kx - controller[it].kx) > 0)
 			des_heading = des_heading;
 		controller[it].steer_angle = atan((des_heading-last_heading)*l/(states[it].velocity*step_size));
+		//del_theta = del_theta + fabs(atan(des_heading - last_heading));
+		//del_theta = atan(des_heading - last_heading);
 		
 		if(controller[it].steer_angle > max_steerangle)
 			controller[it].steer_angle = max_steerangle;
@@ -86,6 +123,7 @@ void compute_states(std::vector<state>& states, state current_states, std::vecto
 		//std::cout << " des_heading : "<< des_heading* 180/PI <<" diff : " <<(des_heading - last_heading) * 180/PI<<" last_heading " <<last_heading * 180/PI<< " steer_angle : "<<controller[it].steer_angle * 180/PI<< std::endl;
 		last_heading = des_heading;
 	}
+	// /std::cout << " del_theta " << del_theta * 180/PI << std::endl;
 	for (int i = 0; i < controller.size()-1; ++i)
 	{
 		states[i].heading = init_heading + states[i].velocity * tan(controller[i].steer_angle)*step_size/l;
@@ -105,6 +143,7 @@ void compute_states(std::vector<state>& states, state current_states, std::vecto
 
 float compute_curve(std::vector<curve> &path,control_parameters params,float k0_x, float k0_y,float step_size){
 	float length = 0;
+	float theta = 0;
 	int n = 1/step_size;
 	path.resize(n);
 	for (int i = 0; i < n; ++i)
@@ -112,24 +151,31 @@ float compute_curve(std::vector<curve> &path,control_parameters params,float k0_
 		float t = i * step_size;
 		path[i].kx = (1 - t) * (1 - t) * k0_x + 2 * (1 - t) * t * params.k1_x+ t * t * params.k2_x;
 		path[i].ky = (1 - t) * (1 - t) * k0_y + 2 * (1 - t) * t * params.k1_y+ t * t * params.k2_y;
-		if(i>0)
+		if(i>0){
 			length = length + sqrt((path[i].kx-path[i-1].kx)*(path[i].kx-path[i-1].kx) + (path[i].ky-path[i-1].ky)*(path[i].ky-path[i-1].ky));
+			//theta = theta + abs(tan((path[i].ky - path[i-1].ky)/path[i].kx - path[i-1].kx));
+		}
+
 		length = length;
 	}
 	std::cout << " length " << length << std::endl;
+	//std::cout << " theta change " << theta << std::endl;
 	return length;
 }
 
 
-void compute_u(std::vector<control> &controller,control_parameters params,float k0_x, float k0_y,float length, float step_size, float init_velocity, float terminal_velocity){
+void compute_u(std::vector<control> &controller,std::vector<curve> &curve_pts,control_parameters params,float k0_x, float k0_y,float length, float step_size, float init_velocity, float terminal_velocity, float last_heading){
 	//int n = length / 2;
-	float tg = len_factor * length/ params.v_0;
-	int n = tg/step_size;
+	//float tg = n*step_size;//len_factor * length/ params.v_0;
+	int n = curve_pts.size();//tg/step_size;
+	float tg = n*step_size;
 	controller.resize(n);
 	params.t_a = tg/3;
 	params.t_b = 2*tg/3;
 	float accel_0 = (params.v_0 - init_velocity)/params.t_a;
 	float accel_f = (terminal_velocity - params.v_0)/(tg-params.t_b);
+	float del_theta = 0;
+	float inflection_point[2];
 	for (int i = 0; i < n/3; ++i)
 	{
 			//if(current_velocity < v_0)
@@ -145,13 +191,33 @@ void compute_u(std::vector<control> &controller,control_parameters params,float 
 	{
 		controller[i].acceleration = accel_f;
 	}
-	for (int i = 0; i < n; ++i)
-	{
-		float t = i * 1/float(n);
-		controller[i].kx = (1 - t) * (1 - t) * k0_x + 2 * (1 - t) * t * params.k1_x+ t * t * params.k2_x;
-		controller[i].ky = (1 - t) * (1 - t) * k0_y + 2 * (1 - t) * t * params.k1_y+ t * t * params.k2_y;
-		
-	}
+	for (int i = 0; i < curve_pts.size(); ++i)
+   	{
+		controller[i].kx = curve_pts[i].kx;
+		controller[i].ky = curve_pts[i].ky;
+		// if(i>0){
+		// 	length = length + sqrt((curve_pts[i].kx-curve_pts[i-1].kx)*(curve_pts[i].kx- curve_pts[i-1].kx) + (curve_pts[i].ky-curve_pts[i-1].ky)*(curve_pts[i].ky-curve_pts[i-1].ky));
+		// 	//theta = theta + abs(tan((path[i].ky - path[i-1].ky)/path[i].kx - path[i-1].kx));
+		// }
+		// std::cout<<i <<" length "<< length<<" x "<< curve_pts[i].kx << " y "<<curve_pts[i].ky  <<  std::endl;
+   	}
+	// for (int i = 0; i < n; ++i)
+	// {
+	// 	float t = i * 1/float(n);
+	// 	controller[i].kx = (1 - t) * (1 - t) * k0_x + 2 * (1 - t) * t * params.k1_x+ t * t * params.k2_x;
+	// 	controller[i].ky = (1 - t) * (1 - t) * k0_y + 2 * (1 - t) * t * params.k1_y+ t * t * params.k2_y;
+	// 	if(i > 0){
+	// 		float des_heading = atan((controller[i+1].ky - controller[i].ky)/(controller[i+1].kx - controller[i].kx));
+	// 		del_theta = del_theta+fabs(atan(des_heading - last_heading));
+	// 		if(fabs(atan(des_heading - last_heading)) > 0.8)
+	// 		{
+	// 			inflection_point[0] = i; ////
+	// 		}
+	// 		//std::cout<< " avg : " << del_theta * 180/PI << " delta : "<< fabs(atan(des_heading - last_heading))*180/PI << std::endl;
+	// 		last_heading = des_heading; 
+	// 	}
+			
+	// }
 		
 }
 // void mapper(float accel_output, float steer_output, can_output output){
@@ -368,13 +434,16 @@ int main(int argc, char **argv){
 	path.header.frame_id = "odom";
 	path.header.stamp = ros::Time();
 	
-	nav_msgs::Path::Ptr expected(new nav_msgs::Path);
-	expected->header.frame_id = "odom";
-	expected->header.stamp = ros::Time();
+	nav_msgs::Path expected;
+	expected.header.frame_id = "odom";
+	expected.header.stamp = ros::Time();
 
 	std::vector<control> controller;
 	std::vector<state> states;
 	std::vector<curve> curve_vec;
+	std::vector<waypoints> way_points; 
+
+
 	control_parameters params;
 	can_output c_output;
 	c_output.throttle = 0;
@@ -384,6 +453,8 @@ int main(int argc, char **argv){
 	float length;
 	float current_length = 0;
 	float step_size = 0.1;
+	way_points.resize(3);
+
 	//int tg = 1;
 	// state current_states;
 	// current_states.x = 0;
@@ -420,23 +491,26 @@ int main(int argc, char **argv){
 		if (target_flag == 2)
 		{
 
-			// params.a1 = 0;
-			// params.b1 = 0;
-			// params.c1 = 1; 
+			params.a1 = 0;
+			params.b1 = 0;
+			params.c1 = 1; 
 			params.k1_x = mid_states.x;//41.923;//
 			params.k1_y = mid_states.y; //-6.422;//
 			params.k2_x = terminal_states.x;//41.604;//
 			params.k2_y = terminal_states.y;-36.988;//
+			way_points[0].x = 0;
+			way_points[0].y = 0;
+ 			way_points[1].x = mid_states.x;
+			way_points[1].y = mid_states.y;
+			way_points[2].x = terminal_states.x;
+			way_points[2].y = terminal_states.y;
 			params.v_0 = max_speed * 5/18;
 			float end_pointerror = 0;
 
-			length = compute_curve(curve_vec,params,current_states.x,current_states.y,0.01);
-			expected->poses.resize(curve_vec.size());
-			for(int j ; j < curve_vec.size(); j++){
-				expected->poses[j].pose.position.x = curve_vec[j].kx;
-				expected->poses[j].pose.position.y = curve_vec[j].ky;
-			}
-			compute_u(controller,params,current_states.x,current_states.y,length,step_size,current_states.velocity,terminal_states.velocity);
+			length = cubic_spline(way_points,curve_vec,current_states); //compute_curve(curve_vec,params,current_states.x,current_states.y,0.01);
+			expected.poses.resize(curve_vec.size());
+
+			compute_u(controller,curve_vec,params,current_states.x,current_states.y,length,step_size,current_states.velocity,terminal_states.velocity,current_states.heading);
 			compute_states(states,current_states,controller,step_size);
 			end_pointerror = sqrt(pow((params.k2_x - states[states.size()-1].x),2)+ pow((params.k2_y - states[states.size()-1].y),2));
 			std::cout << " error " << end_pointerror<< std::endl;
@@ -449,12 +523,15 @@ int main(int argc, char **argv){
 			// 		std::cout << " sizes " << controller.size()<< " state " << states.size()<< std::endl;
 			// 	}
 			// } 
-			path.poses.resize(states.size());
-			for(int i ; i < states.size(); i++){
-					path.poses[i].pose.position.x = states[i].x;
-					path.poses[i].pose.position.y = states[i].y;
-			}
-			
+			// path.poses.resize(states.size());
+			// for(int i ; i < states.size(); i++){
+			// 		path.poses[i].pose.position.x = states[i].x;
+			// 		path.poses[i].pose.position.y = states[i].y;
+			// }
+			for(int j ; j < curve_vec.size(); j++){
+				expected.poses[j].pose.position.x = curve_vec[j].kx;
+				expected.poses[j].pose.position.y = curve_vec[j].ky;
+			}			
 			//std::cout <<" states size " <<states.size()<<" curve size " <<curve_vec.size()<< std::endl;
 			target_flag = 3;
 
@@ -488,17 +565,18 @@ int main(int argc, char **argv){
 		    int throttle_output = int(c_output.throttle);
 		    int brake_output = int(c_output.brake);
 		    int steering_output = int(c_output.steer_angle);
-		    ss  << "/home/sarthak/catkin_ws/src/CAN_interfacing/scripts/sendCAN.sh "<< throttle_output<<" "<<brake_output<<" "<<steering_output<<" "<<steer_dir<<" FORWARD NONE OFF OFF OFF OFF";		   	
-		    system(ss.str().c_str());
-		    ss.clear();
+		    // ss  << "/home/sarthak/catkin_ws/src/CAN_interfacing/scripts/sendCAN.sh "<< throttle_output<<" "<<brake_output<<" "<<steering_output<<" "<<steer_dir<<" FORWARD NONE OFF OFF OFF OFF";		   	
+		    // system(ss.str().c_str());
+		    // ss.clear();
 			last_state = current_states;
-			pub.publish(path);
+			//pub.publish(path);
+			pub2.publish(expected);
 			target_pub.publish(*target_marker);
 			vis_pub2.publish(*marker);
 
 		}
 		visualization(current_marker, current_states.x, current_states.y,q_tf, 0,1,0);
-		pub2.publish(*expected);
+		
 		vis_pub.publish(*current_marker);
 		loop_rate.sleep();
 		}
