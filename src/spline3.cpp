@@ -25,13 +25,13 @@
 //#define max_speed 20*5/18  //kmph
 #define l 2.1          // wheelbase length in meters
 
-float max_speed = 30*5/18;
+float max_speed = 20*5/18;
 int max_throttle = 40;
 float len_factor = 1.6;
 float target_flag = 0;
 float init_flag = 0;
 float max_steerangle = 40 * PI/180; // max steer angle in rad
-float time_factor = 3;
+float time_factor = 5;
 
 
 struct state{
@@ -45,7 +45,7 @@ struct curve
 	float kx, ky;
 };
 struct control_parameters{
-	float a1, b1, c1, k1_x, k1_y, k2_x, k2_y, t_a, t_b, v_0;
+	float a1, b1, c1, k1_x, k1_y, k2_x, k2_y,t_a,t_b,v_0;
 };
 struct can_output{
 	float throttle, brake, steer_angle, steer_dir;
@@ -123,7 +123,7 @@ void compute_states(std::vector<state>& states, state current_states, std::vecto
 	float init_heading = current_states.heading;
 	float init_velocity = current_states.velocity;
 	float last_heading = init_heading;
-	float del_theta = 0;
+	float del_theta=0;
 	length = 0;
 	step_size = 0.1;
 	std::cout<<" n "<< controller.size()<< std::endl;	
@@ -132,10 +132,9 @@ void compute_states(std::vector<state>& states, state current_states, std::vecto
 	{
 		//std::cout<<"errr "<<std::endl;
 		state temp_speed;
-		temp_speed.velocity = controller[j].speed; 
-		//init_velocity+ controller[j].acceleration*step_size;
+		temp_speed.velocity = controller[j].speed; //init_velocity+ controller[j].acceleration*step_size;
 		// if(states[j].velocity > max_speed*5/18){
-		// states[j].velocity = max_speed*5/18;
+		// 	states[j].velocity = max_speed*5/18;
 		// }
 		if(temp_speed.velocity < 0){
 			temp_speed.velocity = 0;
@@ -643,10 +642,10 @@ int main(int argc, char **argv){
 			// params.k2_x = terminal_states.x;//41.604;//
 			// params.k2_y = terminal_states.y;-36.988;//
 			way_points[0].x = 0;way_points[0].y = 0;
-			way_points[1].x = 5;way_points[1].y = 1;
-			way_points[2].x = 10;way_points[2].y = 3;
-			way_points[3].x = 20;way_points[3].y = 7;
-			way_points[4].x = 40;way_points[4].y = 12;
+			way_points[1].x = 20;way_points[1].y = 1;
+			way_points[2].x = 40;way_points[2].y = 3;
+			way_points[3].x = 60;way_points[3].y = 7;
+			way_points[4].x = 80;way_points[4].y = 12;
 
 			
 			// params.v_0 = max_speed * 5/18;
@@ -677,7 +676,7 @@ int main(int argc, char **argv){
 			target_error = sqrt(pow((way_points[4].x - states[states.size()-1].x),2)+ pow((way_points[4].y - states[states.size()-1].y),2));
 			std::cout << " error " << end_pointerror<< std::endl;
 			int count =0;
-			while(fabs(end_pointerror) >1 && count < 10){//for(int i=0; i<10 ; i++ ){
+			while(fabs(end_pointerror) >1 && count < 5){//for(int i=0; i<10 ; i++ ){
 				//if(end_pointerror > 2){
 					speed_factor = (max_speed*speed_factor + end_pointerror/controller.size())/max_speed;
 					compute_u2(length,controller,curve_vec,step_size, current_states,terminal_states,speed_factor,curve_factor);
