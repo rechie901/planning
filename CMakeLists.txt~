@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(p2pnav)
-
+set (CMAKE_CXX_FLAGS "-std=c++11")
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
@@ -140,6 +140,7 @@ add_executable(p2pnav_node src/main.cpp)
 add_executable(spline_node src/spline.cpp)
 add_executable(curve_fit src/curve_fit.cpp)
 add_executable(spline2 src/spline2.cpp)
+add_executable(visual src/visual.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(p2pnav_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -157,7 +158,9 @@ target_link_libraries(curve_fit
 target_link_libraries(spline2
    ${catkin_LIBRARIES}
 )
-
+target_link_libraries(visual
+   ${catkin_LIBRARIES}
+)
 #############
 ## Install ##
 #############
